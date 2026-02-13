@@ -36,7 +36,15 @@
     return l.indexOf('OAuth') !== -1 || v.indexOf('cli') !== -1 || v.indexOf('codex') !== -1 || v.indexOf('portal') !== -1;
   }
 
+  // Fallback auth groups if the server returns none (e.g. status endpoint failed or timed out).
+  var FALLBACK_AUTH_GROUPS = [
+    { value: "anthropic", label: "Anthropic", hint: "Claude API key", options: [{ value: "apiKey", label: "Anthropic API key" }] },
+    { value: "google", label: "Google", hint: "Gemini API key", options: [{ value: "gemini-api-key", label: "Google Gemini API key" }] },
+    { value: "openai", label: "OpenAI", hint: "API key", options: [{ value: "openai-api-key", label: "OpenAI API key" }] }
+  ];
+
   function renderAuth(groups) {
+    if (!groups || groups.length === 0) groups = FALLBACK_AUTH_GROUPS;
     authGroupEl.innerHTML = '';
 
     // Toggle for showing interactive OAuth choices.
@@ -133,6 +141,7 @@
     }).catch(function (e) {
       setStatus('Error: ' + String(e));
       if (statusDetailsEl) statusDetailsEl.textContent = '';
+      renderAuth(FALLBACK_AUTH_GROUPS);
     });
   }
 
