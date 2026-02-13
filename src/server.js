@@ -502,8 +502,14 @@ app.get("/setup", requireSetupAuth, (_req, res) => {
 </html>`);
 });
 
-// Auth groups for the setup wizard. Defined once so status can always return them even if OpenClaw CLI is slow or fails.
-const AUTH_GROUPS = [
+app.get("/setup/api/status", requireSetupAuth, async (_req, res) => {
+  const version = await runCmd(OPENCLAW_NODE, clawArgs(["--version"]));
+  const channelsHelp = await runCmd(OPENCLAW_NODE, clawArgs(["channels", "add", "--help"]));
+
+  // We reuse OpenClaw's own auth-choice grouping logic indirectly by hardcoding the same group defs.
+  // This is intentionally minimal; later we can parse the CLI help output to stay perfectly in sync.
+  // NOTE: On Railway, interactive OAuth flows are typically not viable. The UI will hide them by default.
+  const authGroups = [
     { value: "openai", label: "OpenAI", hint: "Codex OAuth + API key", options: [
       { value: "codex-cli", label: "OpenAI Codex OAuth (Codex CLI)" },
       { value: "openai-codex", label: "OpenAI Codex (ChatGPT OAuth)" },
@@ -551,33 +557,12 @@ const AUTH_GROUPS = [
     ]}
   ];
 
-const STATUS_CLI_TIMEOUT_MS = 15000;
-
-app.get("/setup/api/status", requireSetupAuth, async (_req, res) => {
-  // Always return authGroups so the provider dropdown works even if OpenClaw CLI is slow or unavailable.
-  let versionOutput = "";
-  let channelsHelpOutput = "";
-  try {
-    const timeout = (ms) => new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms));
-    const [version, channelsHelp] = await Promise.race([
-      Promise.all([
-        runCmd(OPENCLAW_NODE, clawArgs(["--version"])),
-        runCmd(OPENCLAW_NODE, clawArgs(["channels", "add", "--help"])),
-      ]),
-      timeout(STATUS_CLI_TIMEOUT_MS),
-    ]);
-    versionOutput = (version && version.output) ? version.output.trim() : "";
-    channelsHelpOutput = (channelsHelp && channelsHelp.output) ? channelsHelp.output : "";
-  } catch (_e) {
-    // OpenClaw may not be ready or timed out; still return authGroups so the user can complete the form.
-  }
-
   res.json({
     configured: isConfigured(),
     gatewayTarget: GATEWAY_TARGET,
-    openclawVersion: versionOutput,
-    channelsAddHelp: channelsHelpOutput,
-    authGroups: AUTH_GROUPS,
+    openclawVersion: version.output.trim(),
+    channelsAddHelp: channelsHelp.output,
+    authGroups,
   });
 });
 
