@@ -400,6 +400,8 @@ app.get("/setup", requireSetupAuth, (_req, res) => {
         <option value="openclaw.update">openclaw update</option>
         <option value="openclaw.logs.tail">openclaw logs --tail N (or fallback)</option>
         <option value="openclaw.config.get">openclaw config get &lt;path&gt;</option>
+        <option value="openclaw.env.set">openclaw env set KEY=VALUE</option>
+        <option value="openclaw.env.unset">openclaw env unset KEY</option>
         <option value="openclaw.version">openclaw --version</option>
         <option value="openclaw.devices.list">openclaw devices list</option>
         <option value="openclaw.devices.approve">openclaw devices approve &lt;requestId&gt;</option>
@@ -896,6 +898,7 @@ function redactSecrets(text) {
   // Very small best-effort redaction. (Config paths/values may still contain secrets.)
   return String(text)
     .replace(/(sk-[A-Za-z0-9_-]{10,})/g, "[REDACTED]")
+    .replace(/(sk-ant-[A-Za-z0-9_-]{10,})/g, "[REDACTED]")
     .replace(/(gho_[A-Za-z0-9_]{10,})/g, "[REDACTED]")
     .replace(/(xox[baprs]-[A-Za-z0-9-]{10,})/g, "[REDACTED]")
     .replace(/(AA[A-Za-z0-9_-]{10,}:\S{10,})/g, "[REDACTED]");
@@ -926,6 +929,8 @@ const ALLOWED_CONSOLE_COMMANDS = new Set([
   "openclaw.update",
   "openclaw.logs.tail",
   "openclaw.config.get",
+  "openclaw.env.set",
+  "openclaw.env.unset",
 
   // Device management (for fixing "disconnected (1008): pairing required")
   "openclaw.devices.list",
@@ -935,6 +940,47 @@ const ALLOWED_CONSOLE_COMMANDS = new Set([
   "openclaw.plugins.list",
   "openclaw.plugins.enable",
 ]);
+
+function upsertEnvVar(filePath, key, value) {
+  const lines = [];
+  let found = false;
+  let input = "";
+  try {
+    input = fs.readFileSync(filePath, "utf8");
+  } catch {
+    // ignore missing file
+  }
+  for (const line of input.split(/\r?\n/)) {
+    if (!line.trim()) {
+      lines.push(line);
+      continue;
+    }
+    if (line.startsWith(`${key}=`)) {
+      lines.push(`${key}=${value}`);
+      found = true;
+    } else {
+      lines.push(line);
+    }
+  }
+  if (!found) lines.push(`${key}=${value}`);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, lines.filter((l) => l !== undefined).join("\n").trimEnd() + "\n", "utf8");
+}
+
+function removeEnvVar(filePath, key) {
+  let input = "";
+  try {
+    input = fs.readFileSync(filePath, "utf8");
+  } catch {
+    return;
+  }
+  const out = input
+    .split(/\r?\n/)
+    .filter((line) => line && !line.startsWith(`${key}=`))
+    .join("\n")
+    .trimEnd();
+  fs.writeFileSync(filePath, (out ? `${out}\n` : ""), "utf8");
+}
 
 app.post("/setup/api/console/run", requireSetupAuth, async (req, res) => {
   const payload = req.body || {};
@@ -999,6 +1045,35 @@ app.post("/setup/api/console/run", requireSetupAuth, async (req, res) => {
       if (!arg) return res.status(400).json({ ok: false, error: "Missing config path" });
       const r = await runCmd(OPENCLAW_NODE, clawArgs(["config", "get", arg]));
       return res.status(r.code === 0 ? 200 : 500).json({ ok: r.code === 0, output: redactSecrets(r.output) });
+    }
+    if (cmd === "openclaw.env.set") {
+      if (!arg || !arg.includes("=")) {
+        return res.status(400).json({ ok: false, error: "Expected KEY=VALUE" });
+      }
+      const [rawKey, ...rest] = arg.split("=");
+      const key = rawKey.trim();
+      const value = rest.join("=").trim();
+      if (!/^[A-Z_][A-Z0-9_]*$/.test(key)) {
+        return res.status(400).json({ ok: false, error: "Invalid env var name" });
+      }
+      if (!value) {
+        return res.status(400).json({ ok: false, error: "Missing env var value" });
+      }
+      const envPath = path.join(STATE_DIR, ".env");
+      upsertEnvVar(envPath, key, value);
+      if (key === "ANTHROPIC_API_KEY") {
+        removeEnvVar(envPath, "OPENAI_API_KEY");
+      }
+      return res.json({ ok: true, output: `Updated ${key} in ${envPath}.\n` });
+    }
+    if (cmd === "openclaw.env.unset") {
+      const key = arg.trim();
+      if (!/^[A-Z_][A-Z0-9_]*$/.test(key)) {
+        return res.status(400).json({ ok: false, error: "Invalid env var name" });
+      }
+      const envPath = path.join(STATE_DIR, ".env");
+      removeEnvVar(envPath, key);
+      return res.json({ ok: true, output: `Removed ${key} from ${envPath} (if present).\n` });
     }
 
     // Device management commands (for fixing "disconnected (1008): pairing required")
