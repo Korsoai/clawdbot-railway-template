@@ -434,6 +434,9 @@ app.get("/setup", requireSetupAuth, (_req, res) => {
     <label>Key / Token (if required)</label>
     <input id="authSecret" type="password" placeholder="Paste API key / token if applicable" />
 
+    <label>Default model id (required)</label>
+    <input id="defaultModelId" placeholder="anthropic/claude-3-5-sonnet" />
+
     <label>Wizard flow</label>
     <select id="flow">
       <option value="quickstart">quickstart</option>
@@ -526,7 +529,7 @@ app.get("/setup/api/status", requireSetupAuth, async (_req, res) => {
     { value: "anthropic", label: "Anthropic", hint: "Claude Code CLI + API key", options: [
       { value: "claude-cli", label: "Anthropic token (Claude Code CLI)" },
       { value: "token", label: "Anthropic token (paste setup-token)" },
-      { value: "apiKey", label: "Anthropic API key" }
+      { value: "anthropic", label: "Anthropic API key" }
     ]},
     { value: "google", label: "Google", hint: "Gemini API key + OAuth", options: [
       { value: "gemini-api-key", label: "Google Gemini API key" },
@@ -575,6 +578,11 @@ app.get("/setup/api/status", requireSetupAuth, async (_req, res) => {
 });
 
 function buildOnboardArgs(payload) {
+  const defaultModelId = (payload.defaultModelId || "").trim();
+  if (!defaultModelId) {
+    throw new Error("Missing default model id (set Default model id in setup)");
+  }
+
   const args = [
     "onboard",
     "--non-interactive",
@@ -605,6 +613,8 @@ function buildOnboardArgs(payload) {
     const map = {
       "openai-api-key": "--openai-api-key",
       "apiKey": "--anthropic-api-key",
+      "anthropic": "--anthropic-api-key",
+      "anthropic-api-key": "--anthropic-api-key",
       "openrouter-api-key": "--openrouter-api-key",
       "ai-gateway-api-key": "--ai-gateway-api-key",
       "moonshot-api-key": "--moonshot-api-key",
@@ -691,6 +701,9 @@ app.post("/setup/api/run", requireSetupAuth, async (req, res) => {
 
   // Optional setup (only after successful onboarding).
   if (ok) {
+    const defaultModelId = (payload.defaultModelId || "").trim();
+    await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", "agents.defaults.model", defaultModelId]));
+
     // Ensure gateway token is written into config so the browser UI can authenticate reliably.
     // (We also enforce loopback bind since the wrapper proxies externally.)
     // IMPORTANT: Set both gateway.auth.token (server-side) and gateway.remote.token (client-side)
