@@ -839,6 +839,16 @@ app.post("/setup/api/run", requireSetupAuth, async (req, res) => {
 app.get("/setup/api/debug", requireSetupAuth, async (_req, res) => {
   const v = await runCmd(OPENCLAW_NODE, clawArgs(["--version"]));
   const help = await runCmd(OPENCLAW_NODE, clawArgs(["channels", "add", "--help"]));
+  const envPath = path.join(STATE_DIR, ".env");
+  let envFileHasAnthropic = false;
+  let envFileHasOpenAI = false;
+  try {
+    const envText = fs.readFileSync(envPath, "utf8");
+    envFileHasAnthropic = /(^|\n)\s*ANTHROPIC_API_KEY\s*=/.test(envText);
+    envFileHasOpenAI = /(^|\n)\s*OPENAI_API_KEY\s*=/.test(envText);
+  } catch {
+    // ignore missing .env
+  }
 
   res.json({
     wrapper: {
@@ -860,6 +870,15 @@ app.get("/setup/api/debug", requireSetupAuth, async (_req, res) => {
       lastDoctorAt,
       lastDoctorOutput,
       railwayCommit: process.env.RAILWAY_GIT_COMMIT_SHA || null,
+      envPresence: {
+        ANTHROPIC_API_KEY: Boolean(process.env.ANTHROPIC_API_KEY?.trim()),
+        OPENAI_API_KEY: Boolean(process.env.OPENAI_API_KEY?.trim()),
+      },
+      envFile: {
+        path: envPath,
+        ANTHROPIC_API_KEY: envFileHasAnthropic,
+        OPENAI_API_KEY: envFileHasOpenAI,
+      },
     },
     openclaw: {
       entry: OPENCLAW_ENTRY,
