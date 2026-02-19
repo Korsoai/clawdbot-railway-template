@@ -397,7 +397,8 @@ app.get("/setup", requireSetupAuth, (_req, res) => {
         <option value="openclaw.health">openclaw health</option>
         <option value="openclaw.doctor">openclaw doctor</option>
         <option value="openclaw.models.list">openclaw models list</option>
-        <option value="openclaw.logs.tail">openclaw logs --tail N</option>
+        <option value="openclaw.update">openclaw update</option>
+        <option value="openclaw.logs.tail">openclaw logs --tail N (or fallback)</option>
         <option value="openclaw.config.get">openclaw config get &lt;path&gt;</option>
         <option value="openclaw.version">openclaw --version</option>
         <option value="openclaw.devices.list">openclaw devices list</option>
@@ -903,6 +904,7 @@ const ALLOWED_CONSOLE_COMMANDS = new Set([
   "openclaw.health",
   "openclaw.doctor",
   "openclaw.models.list",
+  "openclaw.update",
   "openclaw.logs.tail",
   "openclaw.config.get",
 
@@ -962,9 +964,16 @@ app.post("/setup/api/console/run", requireSetupAuth, async (req, res) => {
       const r = await runCmd(OPENCLAW_NODE, clawArgs(["models", "list"]));
       return res.status(r.code === 0 ? 200 : 500).json({ ok: r.code === 0, output: redactSecrets(r.output) });
     }
+    if (cmd === "openclaw.update") {
+      const r = await runCmd(OPENCLAW_NODE, clawArgs(["update"]));
+      return res.status(r.code === 0 ? 200 : 500).json({ ok: r.code === 0, output: redactSecrets(r.output) });
+    }
     if (cmd === "openclaw.logs.tail") {
       const lines = Math.max(50, Math.min(1000, Number.parseInt(arg || "200", 10) || 200));
-      const r = await runCmd(OPENCLAW_NODE, clawArgs(["logs", "--tail", String(lines)]));
+      let r = await runCmd(OPENCLAW_NODE, clawArgs(["logs", "--tail", String(lines)]));
+      if (r.code !== 0 && /unknown option ['"]--tail['"]/.test(r.output || "")) {
+        r = await runCmd(OPENCLAW_NODE, clawArgs(["logs"]));
+      }
       return res.status(r.code === 0 ? 200 : 500).json({ ok: r.code === 0, output: redactSecrets(r.output) });
     }
     if (cmd === "openclaw.config.get") {
