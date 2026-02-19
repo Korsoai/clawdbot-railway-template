@@ -396,6 +396,7 @@ app.get("/setup", requireSetupAuth, (_req, res) => {
         <option value="openclaw.status">openclaw status</option>
         <option value="openclaw.health">openclaw health</option>
         <option value="openclaw.doctor">openclaw doctor</option>
+        <option value="openclaw.models.list">openclaw models list</option>
         <option value="openclaw.logs.tail">openclaw logs --tail N</option>
         <option value="openclaw.config.get">openclaw config get &lt;path&gt;</option>
         <option value="openclaw.version">openclaw --version</option>
@@ -901,6 +902,7 @@ const ALLOWED_CONSOLE_COMMANDS = new Set([
   "openclaw.status",
   "openclaw.health",
   "openclaw.doctor",
+  "openclaw.models.list",
   "openclaw.logs.tail",
   "openclaw.config.get",
 
@@ -954,6 +956,10 @@ app.post("/setup/api/console/run", requireSetupAuth, async (req, res) => {
     }
     if (cmd === "openclaw.doctor") {
       const r = await runCmd(OPENCLAW_NODE, clawArgs(["doctor"]));
+      return res.status(r.code === 0 ? 200 : 500).json({ ok: r.code === 0, output: redactSecrets(r.output) });
+    }
+    if (cmd === "openclaw.models.list") {
+      const r = await runCmd(OPENCLAW_NODE, clawArgs(["models", "list"]));
       return res.status(r.code === 0 ? 200 : 500).json({ ok: r.code === 0, output: redactSecrets(r.output) });
     }
     if (cmd === "openclaw.logs.tail") {
