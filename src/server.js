@@ -269,6 +269,39 @@ async function enforceBrowserRuntimePolicy() {
   );
   outputs.push(`[config browser.enabled=false] exit=${browserDisable.code}`);
 
+  // Disable built-in web_search/web_fetch tools so the model doesn't keep selecting them.
+  // We want browsing to route through agent-browser policy + CLI workflow.
+  const webSearchDisable = await runCmd(
+    OPENCLAW_NODE,
+    clawArgs(["config", "set", "--json", "tools.web.search.enabled", "false"]),
+  );
+  outputs.push(
+    `[config tools.web.search.enabled=false] exit=${webSearchDisable.code}`,
+  );
+
+  const webFetchDisable = await runCmd(
+    OPENCLAW_NODE,
+    clawArgs(["config", "set", "--json", "tools.web.fetch.enabled", "false"]),
+  );
+  outputs.push(
+    `[config tools.web.fetch.enabled=false] exit=${webFetchDisable.code}`,
+  );
+
+  // Keep sandbox browser control disabled as well.
+  const sandboxBrowserDisable = await runCmd(
+    OPENCLAW_NODE,
+    clawArgs([
+      "config",
+      "set",
+      "--json",
+      "agents.defaults.sandbox.browser.enabled",
+      "false",
+    ]),
+  );
+  outputs.push(
+    `[config agents.defaults.sandbox.browser.enabled=false] exit=${sandboxBrowserDisable.code}`,
+  );
+
   // Keep wrapper-driven restart UX available for recovery flows.
   const restartEnable = await runCmd(
     OPENCLAW_NODE,
