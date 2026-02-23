@@ -245,6 +245,40 @@ function ensureDefaultBrowserGuidance() {
   upsertManagedMarkdownBlock(toolsPath, startMarker, endMarker, blockContent);
 }
 
+function ensureWorkspaceBootstrapFiles() {
+  const memoryDir = path.join(WORKSPACE_DIR, "memory");
+  const memoryFile = path.join(memoryDir, "MEMORY.md");
+  fs.mkdirSync(memoryDir, { recursive: true });
+  if (!fs.existsSync(memoryFile)) {
+    fs.writeFileSync(
+      memoryFile,
+      "# MEMORY.md\n\nThis file stores long-term notes for the agent.\n",
+      "utf8",
+    );
+  }
+}
+
+async function enforceBrowserRuntimePolicy() {
+  const outputs = [];
+
+  // On Railway/headless containers, the built-in browser control service (Chrome extension relay)
+  // is not reliable. Disable it so the agent uses agent-browser CLI instead.
+  const browserDisable = await runCmd(
+    OPENCLAW_NODE,
+    clawArgs(["config", "set", "--json", "browser.enabled", "false"]),
+  );
+  outputs.push(`[config browser.enabled=false] exit=${browserDisable.code}`);
+
+  // Keep wrapper-driven restart UX available for recovery flows.
+  const restartEnable = await runCmd(
+    OPENCLAW_NODE,
+    clawArgs(["config", "set", "--json", "commands.restart", "true"]),
+  );
+  outputs.push(`[config commands.restart=true] exit=${restartEnable.code}`);
+
+  return outputs.join("\n");
+}
+
 let gatewayProc = null;
 let gatewayStarting = null;
 
@@ -796,7 +830,10 @@ app.post("/setup/api/run", requireSetupAuth, async (req, res) => {
       let policyMsg = "";
       try {
         ensureDefaultBrowserGuidance();
+        ensureWorkspaceBootstrapFiles();
+        const policyOut = await enforceBrowserRuntimePolicy();
         policyMsg = "Refreshed browser policy: agent-browser default (strict, no fallback).\n";
+        policyMsg += `${policyOut}\n`;
       } catch (err) {
         policyMsg = `Warning: failed to refresh browser policy: ${String(err)}\n`;
       }
@@ -829,8 +866,11 @@ app.post("/setup/api/run", requireSetupAuth, async (req, res) => {
   if (ok) {
     try {
       ensureDefaultBrowserGuidance();
+      ensureWorkspaceBootstrapFiles();
+      const policyOut = await enforceBrowserRuntimePolicy();
       extra +=
         "\n[browsing policy] configured: agent-browser is default (strict, no fallback)\n";
+      extra += `${policyOut}\n`;
     } catch (err) {
       extra += `\n[browsing policy] warning: failed to write policy: ${String(err)}\n`;
     }
