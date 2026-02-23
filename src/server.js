@@ -312,6 +312,23 @@ async function enforceBrowserRuntimePolicy() {
   return outputs.join("\n");
 }
 
+let managedRuntimeDefaultsApplied = false;
+
+async function ensureManagedRuntimeDefaults() {
+  if (managedRuntimeDefaultsApplied || !isConfigured()) return;
+  try {
+    ensureDefaultBrowserGuidance();
+    ensureWorkspaceBootstrapFiles();
+    const out = await enforceBrowserRuntimePolicy();
+    console.log(`[wrapper] applied managed browser/runtime defaults\n${out}`);
+    managedRuntimeDefaultsApplied = true;
+  } catch (err) {
+    console.error(
+      `[wrapper] failed to apply managed browser/runtime defaults: ${String(err)}`,
+    );
+  }
+}
+
 let gatewayProc = null;
 let gatewayStarting = null;
 
@@ -1552,6 +1569,7 @@ app.use(async (req, res) => {
 
   if (isConfigured()) {
     try {
+      await ensureManagedRuntimeDefaults();
       await ensureGatewayRunning();
     } catch (err) {
       const hint = [
@@ -1584,6 +1602,7 @@ const server = app.listen(PORT, "0.0.0.0", async () => {
   if (isConfigured()) {
     console.log("[wrapper] config detected; starting gateway...");
     try {
+      await ensureManagedRuntimeDefaults();
       await ensureGatewayRunning();
       console.log("[wrapper] gateway ready");
     } catch (err) {
@@ -1598,6 +1617,7 @@ server.on("upgrade", async (req, socket, head) => {
     return;
   }
   try {
+    await ensureManagedRuntimeDefaults();
     await ensureGatewayRunning();
   } catch {
     socket.destroy();
