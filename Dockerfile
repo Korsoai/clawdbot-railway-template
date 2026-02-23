@@ -51,6 +51,11 @@ RUN apt-get update \
 # `openclaw update` expects pnpm. Provide it in the runtime image.
 RUN corepack enable && corepack prepare pnpm@10.23.0 --activate
 
+# Preinstall browser automation tooling so first-run browsing works on Railway.
+RUN npm install -g agent-browser \
+  && agent-browser install --with-deps \
+  && agent-browser --help >/dev/null
+
 WORKDIR /app
 
 # Wrapper deps

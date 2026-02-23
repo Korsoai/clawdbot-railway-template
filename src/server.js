@@ -84,6 +84,65 @@ function resolveGatewayToken() {
   return generated;
 }
 
+// Memory reset: if OPENCLAW_RESET_MEMORIES=1, wipe the workspace and all non-config
+// state (logs, sessions, history) while preserving config/auth/API-keys.
+// Files preserved: openclaw.json (+ legacy names), gateway.token, .env
+// After triggering, remove the env var in Railway to prevent wiping on every restart.
+const RESET_MEMORIES = (process.env.OPENCLAW_RESET_MEMORIES || "").trim();
+if (RESET_MEMORIES === "1" || RESET_MEMORIES.toLowerCase() === "true") {
+  console.warn("[wrapper] OPENCLAW_RESET_MEMORIES is set — wiping memories/workspace while preserving config and auth...");
+  try {
+    // Snapshot files we must keep.
+    const keepFiles = [
+      "openclaw.json",
+      "moltbot.json",
+      "clawdbot.json",
+      "gateway.token",
+      ".env",
+    ];
+    /** @type {Map<string, Buffer>} */
+    const saved = new Map();
+    for (const name of keepFiles) {
+      const p = path.join(STATE_DIR, name);
+      try {
+        saved.set(name, fs.readFileSync(p));
+      } catch {
+        // file doesn't exist — nothing to save
+      }
+    }
+
+    // Wipe everything in the state dir.
+    fs.rmSync(STATE_DIR, { recursive: true, force: true });
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+
+    // Restore the kept files.
+    for (const [name, buf] of saved) {
+      const p = path.join(STATE_DIR, name);
+      fs.writeFileSync(p, buf, { mode: 0o600 });
+      console.warn(`[wrapper] Restored: ${p}`);
+    }
+
+    console.warn("[wrapper] Memory reset complete. Remove OPENCLAW_RESET_MEMORIES from Railway env vars to prevent wiping on next restart.");
+  } catch (err) {
+    console.error(`[wrapper] Memory reset failed: ${String(err)}`);
+  }
+}
+
+// Factory reset: if OPENCLAW_FACTORY_RESET=1, wipe STATE_DIR on boot so the
+// next deploy starts completely fresh (no memories, no config, no workspace).
+// After triggering, remove the env var in Railway to prevent wiping on every restart.
+const FACTORY_RESET = (process.env.OPENCLAW_FACTORY_RESET || "").trim();
+if (FACTORY_RESET === "1" || FACTORY_RESET.toLowerCase() === "true") {
+  console.warn("[wrapper] OPENCLAW_FACTORY_RESET is set — wiping state directory for a fresh start...");
+  try {
+    fs.rmSync(STATE_DIR, { recursive: true, force: true });
+    console.warn(`[wrapper] Wiped: ${STATE_DIR}`);
+  } catch (err) {
+    console.error(`[wrapper] Factory reset: failed to wipe state dir: ${String(err)}`);
+  }
+  console.warn("[wrapper] Factory reset complete. Remove OPENCLAW_FACTORY_RESET from Railway env vars to prevent wiping on next restart.");
+}
+
 const OPENCLAW_GATEWAY_TOKEN = resolveGatewayToken();
 process.env.OPENCLAW_GATEWAY_TOKEN = OPENCLAW_GATEWAY_TOKEN;
 
@@ -131,6 +190,59 @@ function isConfigured() {
   } catch {
     return false;
   }
+}
+
+function escapeRegex(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function upsertManagedMarkdownBlock(filePath, startMarker, endMarker, blockContent) {
+  let existing = "";
+  try {
+    existing = fs.readFileSync(filePath, "utf8");
+  } catch {
+    // missing file is expected on first setup
+  }
+
+  const normalized = existing.replace(/\r\n/g, "\n");
+  const block = `${startMarker}\n${blockContent.trimEnd()}\n${endMarker}`;
+  const hasManagedBlock =
+    normalized.includes(startMarker) && normalized.includes(endMarker);
+
+  let next = normalized;
+  if (hasManagedBlock) {
+    const re = new RegExp(
+      `${escapeRegex(startMarker)}[\\s\\S]*?${escapeRegex(endMarker)}`,
+      "m",
+    );
+    next = normalized.replace(re, block);
+  } else {
+    const prefix = normalized.trimEnd();
+    next = `${prefix}${prefix ? "\n\n" : ""}${block}\n`;
+  }
+
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, next, "utf8");
+}
+
+function ensureDefaultBrowserGuidance() {
+  const toolsPath = path.join(WORKSPACE_DIR, "TOOLS.md");
+  const startMarker = "<!-- openclaw-railway-template:agent-browser-policy:start -->";
+  const endMarker = "<!-- openclaw-railway-template:agent-browser-policy:end -->";
+  const blockContent = [
+    "## Browser Automation Policy (managed)",
+    "",
+    "- `agent-browser` is the default and required browsing tool.",
+    "- Use this workflow for browsing tasks: `agent-browser open <url>` -> `agent-browser snapshot -i` -> interact by refs -> snapshot again after navigation/DOM changes.",
+    "- If browser automation fails, stop and report the failure with command output and context.",
+    "- Do not fall back to Tavily, WebFetch, or alternate browsing/search tools unless the user explicitly overrides this policy.",
+    "",
+    "Quick health check:",
+    "- `agent-browser --help`",
+    "- `agent-browser snapshot -i --json` (after opening a page)",
+  ].join("\n");
+
+  upsertManagedMarkdownBlock(toolsPath, startMarker, endMarker, blockContent);
 }
 
 let gatewayProc = null;
@@ -681,8 +793,18 @@ function runCmd(cmd, args, opts = {}) {
 app.post("/setup/api/run", requireSetupAuth, async (req, res) => {
   try {
     if (isConfigured()) {
+      let policyMsg = "";
+      try {
+        ensureDefaultBrowserGuidance();
+        policyMsg = "Refreshed browser policy: agent-browser default (strict, no fallback).\n";
+      } catch (err) {
+        policyMsg = `Warning: failed to refresh browser policy: ${String(err)}\n`;
+      }
       await ensureGatewayRunning();
-      return res.json({ ok: true, output: "Already configured.\nUse Reset setup if you want to rerun onboarding.\n" });
+      return res.json({
+        ok: true,
+        output: `Already configured.\nUse Reset setup if you want to rerun onboarding.\n${policyMsg}`,
+      });
     }
 
     fs.mkdirSync(STATE_DIR, { recursive: true });
@@ -705,6 +827,14 @@ app.post("/setup/api/run", requireSetupAuth, async (req, res) => {
 
   // Optional setup (only after successful onboarding).
   if (ok) {
+    try {
+      ensureDefaultBrowserGuidance();
+      extra +=
+        "\n[browsing policy] configured: agent-browser is default (strict, no fallback)\n";
+    } catch (err) {
+      extra += `\n[browsing policy] warning: failed to write policy: ${String(err)}\n`;
+    }
+
     const defaultModelId = (payload.defaultModelId || "").trim();
     await runCmd(OPENCLAW_NODE, clawArgs(["config", "set", "agents.defaults.model", defaultModelId]));
 

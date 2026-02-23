@@ -9,6 +9,8 @@ This repo packages **OpenClaw** for Railway with a small **/setup** web wizard s
 - Persistent state via **Railway Volume** (so config/credentials/memory survive redeploys)
 - One-click **Export backup** (so users can migrate off Railway later)
 - **Import backup** from `/setup` (advanced recovery)
+- Built-in **agent-browser** runtime support for web automation
+- A default **browser policy** that uses `agent-browser` first (strict no-fallback)
 
 ## How it works (high level)
 
@@ -16,6 +18,16 @@ This repo packages **OpenClaw** for Railway with a small **/setup** web wizard s
 - The wrapper protects `/setup` with `SETUP_PASSWORD`.
 - During setup, the wrapper runs `openclaw onboard --non-interactive ...` inside the container, writes state to the volume, and then starts the gateway.
 - After setup, **`/` is OpenClaw**. The wrapper reverse-proxies all traffic (including WebSockets) to the local gateway process.
+
+## Default browsing behavior (`agent-browser`)
+
+This template treats `agent-browser` as the default browsing tool.
+
+- The runtime image preinstalls `agent-browser` and browser dependencies.
+- Setup writes a managed browser policy block to `TOOLS.md` in the OpenClaw workspace.
+- Policy is strict by default: if browser automation fails, report the failure; do **not** silently fall back to Tavily/WebFetch/other search tools.
+
+If you want different behavior, update your workspace guidance after setup.
 
 ## Railway deploy instructions (what you’ll publish as a Template)
 
@@ -101,6 +113,7 @@ Building OpenClaw from source can exceed small memory tiers.
 Recommendations:
 - Use a plan with **2GB+ memory**.
 - If you see `Reached heap limit Allocation failed - JavaScript heap out of memory`, upgrade memory and redeploy.
+- Browser automation is heavier than plain API search. If browsing tasks fail under load, increase memory/CPU and redeploy.
 
 ## Local smoke test
 
